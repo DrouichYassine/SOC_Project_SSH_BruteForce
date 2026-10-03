@@ -1,1 +1,78 @@
-# SOC_Project_SSH_BruteForce
+# 🛡️ SOC Analyst Project 1: SSH Brute Force Investigation & Active Response
+
+## 📝 Executive Summary
+A comprehensive investigation of a simulated SSH brute-force attack targeting a Linux server monitored by a Wazuh SIEM. This project demonstrates the complete lifecycle of a SOC incident: from initial detection (Triage) and deep log telemetry analysis (Investigation) to the automated isolation of the threat via an Active Response configuration.
+
+## 🛠️ Environment & Tooling
+* **Wazuh SIEM (v4.14.8):** Docker deployment (Manager) & Linux Agent.
+* **Ubuntu Server:** Attack target (IP: `192.168.122.72`).
+* **Kali Linux & Hydra:** Red team traffic generation.
+* **iptables:** Target host firewall for threat containment.
+
+## 🎯 MITRE ATT&CK Mapping
+| Tactic | Technique | Sub-technique (ID) |
+| :--- | :--- | :--- |
+| **Credential Access** | Brute Force | Password Guessing (T1110.001) |
+
+---
+
+## 🔍 Investigation Phases (SOC Workflow)
+
+### 1. Detection & Triage
+The automated attack generated a massive volume of failed authentication logs. The Threat Hunting dashboard recorded over 814 authentication failures within the analyzed timeframe. 
+
+The Wazuh correlation engine successfully detected the anomaly, triggering multiple critical Level 10 alerts:
+* **Rule `5763`:** *sshd: brute force trying to get access to the system. Authentication failed.*
+* **Rule `2502`:** *syslog: User missed the password more than one time.*
+
+![Wazuh Dashboard](screenshots/Threat_Hunting_Dashboard.png)
+*> Exhibit 1: Global dashboard illustrating the spike in failed authentications and mapped MITRE ATT&CK tactics.*
+
+![Wazuh Events](screenshots/Threat_Hunting_Event.png)
+*> Exhibit 2: Raw event logs and the sequence of triggered correlation rules during the attack window.*
+
+### 2. Deep Investigation & Behavioral Analysis
+Detailed inspection of the event metadata allowed for the extraction of key Indicators of Compromise (IoCs) and attacker methodology.
+* **Target Asset:** Agent `yassine` (IP: `192.168.122.72`).
+* **Targeted Account:** `yassine` (`data.dstuser`).
+* **Threat Origin:** Source IP `192.168.122.1` (`data.srcip`).
+* **Behavioral Profiling:** An analysis of the raw PAM logs (`full_log`) reveals a delta of approximately **2 milliseconds** between authentication failures. This superhuman execution velocity mechanically proves the use of an automated dictionary attack tool (e.g., Hydra) and rules out manual password guessing. 
+* **Impact Assessment:** A strict DQL query filtering for successful SSH logins (`rule.id: 5715`) from the attacker's IP returned 0 occurrences. The system was not breached.
+
+![Event Details](screenshots/Event_details.png)
+*> Exhibit 3: Document Details panel revealing the attacker's source IP, the targeted user, and the timestamp deltas.*
+
+### 3. Automated Containment (Active Response)
+To neutralize the threat in real-time without requiring human intervention, the Wazuh **Active Response** module was configured to react to critical brute-force alerts.
+* **Action:** Execution of the `firewall-drop` script directly on the targeted agent.
+* **Validation:** Inspection of the agent's local firewall (`iptables`) confirmed the dynamic injection of a strict `DROP` rule for the IP `192.168.122.1`, instantly severing the attacker's access.
+
+![iptables Block](screenshots/iptables_result.png)
+*> Exhibit 4: Ubuntu agent console confirming the automated addition of the iptables DROP rule by the Wazuh orchestrator.*
+
+* **Configuration Details:** The response was engineered by modifying the manager's `ossec.conf` to trigger specifically on rule `2502` with a 24-hour ban:
+  ```xml
+  <active-response>
+    <command>firewall-drop</command>
+    <location>local</location>
+    <rules_id>2502</rules_id>
+    <timeout>86400</timeout>
+  </active-response>
+  ```
+
+---
+
+## 🎫 SOC Incident Ticket
+**ID:** INC-2026-001 | **Severity:** HIGH | **Status:** Closed (Threat Contained)
+
+* **Date of Incident:** October 1, 2026
+* **Target Asset:** Ubuntu Agent `192.168.122.72` (Targeted account: `yassine`)
+* **Source (Attacker):** `192.168.122.1`
+* **Vector:** `sshd` daemon (TCP Port 22)
+* **Technical Analysis:** Detection of a high-velocity automated dictionary attack (MITRE T1110.001). Log timestamps indicate a ~2ms interval between requests, confirming automated tool usage. The activity triggered critical correlation rules `5763` and `2502`.
+* **Verdict:** Repelled compromise attempt (True Positive). Deep analysis confirms target system integrity with zero unauthorized access events.
+* **Remediation:** Successful containment. The attacker's IP address was autonomously added to the local firewall (`iptables`) blocklist via Wazuh Active Response.
+
+## 💡 Lessons Learned & Operational Takeaways
+* **The "Self-Lockout" Phenomenon:** During containment validation, the Wazuh agent successfully blocked the attacker's IP. However, because this was a lab environment where the attacker and the Wazuh Manager shared the same host IP, the agent inadvertently blocked its own manager, resulting in a "Disconnected" state. 
+* **Remediation & Best Practice:** The connection was manually restored by flushing the specific `iptables` drop rule via the agent's CLI. In a production environment, this highlights the critical necessity of configuring an **IP Whitelist** (`<white_list>`) for all security infrastructure and SOC analyst subnets to prevent autonomous systems from severing their own management connections.

@@ -60,19 +60,33 @@ To neutralize the threat in real-time without requiring human intervention, the 
   </active-response>
   ```
 
+### 4. Successful Compromise Simulation (Post-Containment Verification)
+To validate the SIEM's advanced detection capabilities, a second attack phase was executed by modifying the `rockyou.txt` dictionary to include the user's legitimate password.
+* **Behavioral Shift:** The Threat Hunting dashboard highlighted a critical evolution, recording 105 authentication failures followed by 5 authentication successes, generating two Level 12+ alerts.
+* **Breach Detection:** The intrusion was instantly flagged by the critical Level 12 alert (Rule `40112`) described as "Multiple authentication failures followed by a success."
+* **Forensic Evidence:** The event document details confirmed unauthorized access from the source IP `192.168.122.1` targeting the agent and user `yassine`. The raw log (`full_log`) captured the exact incoming SSH session: `Oct 04 16:55:47 yassine sshd-session[1587]: Accepted password for yassine from 192.168.122.1 port 56358 ssh2`.
+
+![Wazuh Dashboard Compromise](screenshots/successful_bruteforce_dash.png)
+*> Exhibit 4: Dashboard confirming authentication successes and critical Level 12 alerts.*
+
+![Wazuh Events Compromise](screenshots/successful_bruteforce_event.png)
+*> Exhibit 5: Event sequence showing the trigger of Rule 40112 following password discovery.*
+
+![Wazuh Event Details Compromise](screenshots/successful_bruteforce_event_details.png.png)
+*> Exhibit 6: Log details confirming password acceptance by the sshd daemon.*
+
 ---
-
 ## 🎫 SOC Incident Ticket
-**ID:** INC-2026-001 | **Severity:** HIGH | **Status:** Closed (Threat Contained)
+**ID:** INC-2026-001 | **Severity:** CRITICAL | **Status:** Closed (Lab Validated)
 
-* **Date of Incident:** October 1, 2026
+* **Date of Incident:** October 4, 2026
 * **Target Asset:** Ubuntu Agent `192.168.122.72` (Targeted account: `yassine`)
 * **Source (Attacker):** `192.168.122.1`
 * **Vector:** `sshd` daemon (TCP Port 22)
-* **Technical Analysis:** Detection of a high-velocity automated dictionary attack (MITRE T1110.001). Log timestamps indicate a ~2ms interval between requests, confirming automated tool usage. The activity triggered critical correlation rules `5763` and `2502`.
-* **Verdict:** Repelled compromise attempt (True Positive). Deep analysis confirms target system integrity with zero unauthorized access events.
-* **Remediation:** Successful containment. The attacker's IP address was autonomously added to the local firewall (`iptables`) blocklist via Wazuh Active Response.
-
+* **Technical Analysis:** Detection of a high-velocity automated dictionary attack (MITRE T1110.001) confirmed by ~2ms intervals between requests. During the second testing phase, the attacker successfully discovered valid credentials, triggering critical rule `40112` (Multiple authentication failures followed by a success).
+* **Verdict:** Successful Compromise (Simulated True Positive). Logs confirm the establishment of an unauthorized SSH session following the attack dictionary modification.
+* **Remediation:** Validation of autonomous blocking via the dynamic addition of the attacker's IP address to the local firewall (`iptables`) blocklist by the Wazuh Active Response module.
 ## 💡 Lessons Learned & Operational Takeaways
 * **The "Self-Lockout" Phenomenon:** During containment validation, the Wazuh agent successfully blocked the attacker's IP. However, because this was a lab environment where the attacker and the Wazuh Manager shared the same host IP, the agent inadvertently blocked its own manager, resulting in a "Disconnected" state. 
 * **Remediation & Best Practice:** The connection was manually restored by flushing the specific `iptables` drop rule via the agent's CLI. In a production environment, this highlights the critical necessity of configuring an **IP Whitelist** (`<white_list>`) for all security infrastructure and SOC analyst subnets to prevent autonomous systems from severing their own management connections.
+* **Credential Security & Defense in Depth:** The successful compromise simulation (Phase 4) demonstrated that SIEM detection must be paired with proactive hardening. The breach was possible due to weak credentials existing in a common dictionary. This highlights the necessity of enforcing strong password policies, implementing Multi-Factor Authentication (MFA), and configuring local account lockout policies (e.g., `pam_faillock.so`) to block guessing attempts at the system level before the SIEM response even triggers.
